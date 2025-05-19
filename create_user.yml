@@ -1,0 +1,19 @@
+---
+- name: Create user with random password and add to wheel group
+  hosts: all
+  become: yes
+  vars:
+    username: "{{ lookup('env', 'ANSIBLE_USERNAME') }}"
+    password: "{{ lookup('password', '/dev/null length=15 chars=ascii_letters,digits') }}"
+
+  tasks:
+    - name: Create user with random password
+      user:
+        name: "{{ username }}"
+        password: "{{ password | password_hash('sha512') }}"
+        groups: wheel
+        append: yes
+
+    - name: Display generated password
+      debug:
+        msg: "Password for user {{ username }} is {{ password }}"
