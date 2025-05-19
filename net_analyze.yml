@@ -1,0 +1,62 @@
+---
+- name: Проверка количества пользователей, использующих процессы по сети
+  hosts: all
+  become: yes
+  tasks:
+    - name: Сбор информации о сетевых соединениях и процессах
+      shell: |
+        netstat -tunap | awk '/^tcp/ {print $7}' | cut -d'/' -f1 | sort | uniq -c | sort -nr
+      register: netstat_output
+
+    - name: Сбор информации о пользователях
+      shell: |
+        ps -eo pid,user | awk '{print $1, $2}'
+      register: ps_output
+
+    - name: Анализ данных и вывод результатов
+      script: |
+        #!/bin/bash
+
+        # Получаем данные из netstat
+        netstat_data=$(echo "{{ netstat_output.stdout }}")
+
+        # Получаем данные из ps
+        ps_data=$(echo "{{ ps_output.stdout }}")
+
+        # Создаем ассоциативный массив для хранения количества пользователей на процесс
+        declare -A process_users
+
+        # Обрабатываем данные netstat
+        while read -r line; do
+          count=$(echo $line | awk '{print $1}')
+          pid=$(echo $line | awk '{print $2}')
+          user=$(echo "$ps_data" | awk -v pid="$pid" '$1 == pid {print $2}')
+          if [[ -n "$user" ]]; then
+            process_users["$pid"]=$count
+          fi
+        done <<< "$netstat_data"
+
+        # Вычисляем максимальное количество на процесс, текущее на процесс и максимальное на систему
+        max_per_process=0
+        current_per_process=0
+        max_per_system=0
+
+        for pid in "${!process_users[@]}"; do
+          count=${process_users[$pid]}
+          if (( count > max_per_process )); then
+            max_per_process=$count
+          fi
+          current_per_process=$count
+          if (( count > max_per_system )); then
+            max_per_system=$count
+          fi
+        done
+
+        echo "Максимальное количество пользователей на процесс: $max_per_process"
+        echo "Текущее количество пользователей на процесс: $current_per_process"
+        echo "Максимальное количество пользователей на систему: $max_per_system"
+      register: result
+
+    - name: Вывод результатов
+      debug:
+        msg: "{{ result.stdout_lines }}"
